@@ -1,0 +1,10 @@
+{
+  "symbol": "ETHUSD",
+  "entry_price": 2047.525,
+  "side": "sell",
+  "size": 2,
+  "initial_sl_price": 2068.0003,
+  "trailing_sl_pct": null,
+  "highest_pnl_pct": 0.0,
+  "time": 1794464150.1384866
+}

@@ -1,0 +1,175 @@
+import urllib.request
+import json
+import time
+import uuid
+import config
+
+HEADERS = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json, text/event-stream',
+    'User-Agent': 'curl/8.4.0'
+}
+
+def call_mcp_tool(action_name, instructions):
+    """Call Delta Exchange action via Viasocket MCP Endpoint"""
+    thread_id = str(uuid.uuid4())[:8]
+    payload = {
+        "jsonrpc": "2.0",
+        "id": int(time.time()),
+        "method": "tools/call",
+        "params": {
+            "name": "Delta_Exchange",
+            "arguments": {
+                "thread_id": f"bot_{thread_id}",
+                "action_name": action_name,
+                "instructions": instructions
+            }
+        }
+    }
+    
+    req = urllib.request.Request(
+        config.MCP_URL,
+        data=json.dumps(payload).encode('utf-8'),
+        headers=HEADERS
+    )
+    
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        content = resp.read().decode('utf-8')
+        for line in content.split('\n'):
+            if line.startswith('data: '):
+                event_data = json.loads(line[6:])
+                text_content = event_data['result']['content'][0]['text']
+                return json.loads(text_content)
+    return None
+
+
+def get_all_tickers():
+    """Fetch all live tickers in one API call for fast scanning"""
+    url = f"{config.DELTA_API_BASE}/v2/tickers"
+    req = urllib.request.Request(url, headers={'User-Agent': 'curl/8.4.0'})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            result = {}
+            for t in data.get('result', []):
+                sym = t.get('symbol')
+                if sym:
+                    result[sym] = {
+                        'symbol': sym,
+                        'mark_price': float(t.get('mark_price') or 0),
+                        'close': float(t.get('close') or 0),
+                        'high': float(t.get('high') or 0),
+                        'low': float(t.get('low') or 0),
+                        'volume': float(t.get('volume') or 0)
+                    }
+            return result
+    except Exception:
+        return {}
+
+
+def get_live_ticker(symbol=None):
+    """Fetch live ticker and mark price directly from Delta India API"""
+    if symbol is None:
+        symbol = config.SYMBOL
+    url = f"{config.DELTA_API_BASE}/v2/tickers"
+    req = urllib.request.Request(url, headers={'User-Agent': 'curl/8.4.0'})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            for t in data.get('result', []):
+                if t.get('symbol') == symbol:
+                    return {
+                        'symbol': symbol,
+                        'mark_price': float(t.get('mark_price') or 0),
+                        'close': float(t.get('close') or 0),
+                        'high': float(t.get('high') or 0),
+                        'low': float(t.get('low') or 0),
+                        'volume': float(t.get('volume') or 0)
+                    }
+    except Exception:
+        pass
+    return None
+
+
+def get_candles(symbol=None, resolution=None, count=50):
+    """
+    Fetch recent historical OHLCV candles from Delta Exchange API.
+    Returns: list of dicts [{'time', 'open', 'high', 'low', 'close', 'volume'}, ...]
+    """
+    if symbol is None:
+        symbol = config.SYMBOL
+    if resolution is None:
+        resolution = config.TIMEFRAME_MINUTES
+    to_time = int(time.time())
+    from_time = to_time - (resolution * 60 * (count + 20))
+    url = f"{config.DELTA_API_BASE}/v2/chart/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
+    req = urllib.request.Request(url, headers={'User-Agent': 'curl/8.4.0'})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            res = data.get('result', {})
+            if res and 'c' in res and 'o' in res:
+                candles = []
+                c_len = len(res['c'])
+                for i in range(c_len):
+                    candles.append({
+                        'time': res['t'][i] if 't' in res and i < len(res['t']) else 0,
+                        'open': float(res['o'][i]),
+                        'high': float(res['h'][i]),
+                        'low': float(res['l'][i]),
+                        'close': float(res['c'][i]),
+                        'volume': float(res['v'][i]) if 'v' in res and i < len(res['v']) else 0.0
+                    })
+                return candles
+    except Exception as e:
+        pass
+    return []
+
+
+def get_wallet_balance():
+    """Fetch live account balance via MCP"""
+    try:
+        res = call_mcp_tool("rowveq1gvjzz", "Get current wallet balances")
+        if res and 'data' in res:
+            for item in res['data']:
+                if item.get('asset_symbol') == 'USD':
+                    return {
+                        'total_usd': float(item.get('balance', 0)),
+                        'available_usd': float(item.get('available_balance', 0)),
+                        'balance_inr': float(item.get('balance_inr', 0))
+                    }
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch balance: {e}")
+    return None
+
+
+def get_open_positions():
+    """Fetch currently active positions via MCP"""
+    try:
+        res = call_mcp_tool("rowickixv4on", "Get all open positions")
+        if res and 'data' in res:
+            data = res['data']
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict) and data.get('success') is False:
+                return []
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch positions: {e}")
+    return []
+
+
+def place_order(symbol=None, side="buy", order_type="market", size=1, price=None):
+    """Place an order on Delta Exchange via MCP"""
+    if symbol is None:
+        symbol = config.SYMBOL
+    instructions = f"Place a {order_type} {side} order for {size} contract of {symbol}"
+    if price and order_type.lower() == "limit":
+        instructions += f" at price {price}"
+    
+    print(f"[ORDER ATTEMPT] {instructions}")
+    try:
+        res = call_mcp_tool("rowxvuezrvvi", instructions)
+        return res
+    except Exception as e:
+        print(f"[ERROR] Failed to place order: {e}")
+        return None
