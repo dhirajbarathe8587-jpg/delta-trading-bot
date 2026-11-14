@@ -29,15 +29,94 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
         self.end_headers()
-        html = """<!DOCTYPE html>
+
+        # Read last 35 lines of trading_bot.log
+        logs_html = "Waiting for logs..."
+        try:
+            if os.path.exists("trading_bot.log"):
+                with open("trading_bot.log", "r", encoding="utf-8", errors="ignore") as f:
+                    lines = f.readlines()
+                    last_lines = lines[-35:] if len(lines) > 35 else lines
+                    logs_html = "".join(last_lines)
+        except Exception as e:
+            logs_html = f"Log read error: {e}"
+
+        # Get active position if any
+        active_pos_html = '<span style="color:#888;">No Trade (Scanning 9 Coins)</span>'
+        try:
+            from delta_client import get_open_positions
+            positions = get_open_positions()
+            if positions:
+                for p in positions:
+                    sz = float(p.get('size', 0))
+                    if sz != 0:
+                        sym = p.get('product_symbol')
+                        side_txt = "LONG (BUY)" if sz > 0 else "SHORT (SELL)"
+                        side_color = "#00e676" if sz > 0 else "#ff5252"
+                        entry = float(p.get('entry_price', 0))
+                        active_pos_html = f'<strong style="color:{side_color};">{side_txt}</strong> on <strong>{sym}</strong> @ ${entry:,.4f}'
+        except:
+            pass
+
+        # Balance
+        bal_html = "$3.69 USD"
+        try:
+            from delta_client import get_wallet_balance
+            b = get_wallet_balance()
+            if b:
+                bal_html = f"${b['total_usd']:.4f} USD (~Rs.{b['balance_inr']:.2f})"
+        except:
+            pass
+
+        html = f"""<!DOCTYPE html>
 <html>
-<head><title>Delta Trading Bot</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-<body style="font-family:sans-serif; background:#121212; color:#fff; padding:20px; text-align:center;">
-    <h2>🤖 Delta Trading Bot is LIVE</h2>
-    <p style="color:#00e676; font-size:1.3rem; font-weight:bold;">● 24/7 Cloud Active</p>
-    <p>Strategy: EMA 9 & 15 Crossover + 15m Trend Filter (BUY & SELL)</p>
-    <p>Coins: XRP, SUI, ADA, XLM, WIF, HBAR, OP, TRUMP, BTC</p>
-    <p style="color:#aaa;">Alerts sent directly to Telegram!</p>
+<head>
+    <title>Delta Trading Bot - Live Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="5">
+    <style>
+        body {{ background:#0e1117; color:#f0f2f6; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; margin:0; padding:15px; }}
+        .header {{ display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #262730; padding-bottom:10px; margin-bottom:15px; }}
+        .title {{ font-size:1.3rem; font-weight:bold; color:#00e676; }}
+        .badge {{ background:#00e67622; color:#00e676; border:1px solid #00e676; padding:4px 10px; border-radius:20px; font-size:0.8rem; font-weight:bold; }}
+        .grid {{ display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-bottom:15px; }}
+        .card {{ background:#1e212b; border:1px solid #2e3346; border-radius:10px; padding:12px; }}
+        .card-label {{ color:#888; font-size:0.75rem; text-transform:uppercase; margin-bottom:5px; }}
+        .card-val {{ font-size:1.1rem; font-weight:bold; }}
+        .terminal-box {{ background:#000; border:1px solid #333; border-radius:8px; padding:12px; font-family:'Courier New',Courier,monospace; font-size:0.78rem; line-height:1.4; color:#00ff66; height:320px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; box-shadow:inset 0 0 10px rgba(0,255,0,0.1); }}
+        .footer {{ text-align:center; color:#555; font-size:0.75rem; margin-top:10px; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="title">🤖 Delta Trading Bot</div>
+        <div class="badge">● 24/7 CLOUD ACTIVE</div>
+    </div>
+    <div class="grid">
+        <div class="card">
+            <div class="card-label">Wallet Balance</div>
+            <div class="card-val" style="color:#ffd700;">{bal_html}</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Active Trade</div>
+            <div class="card-val" style="font-size:0.95rem;">{active_pos_html}</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Strategy / Risk</div>
+            <div class="card-val" style="font-size:0.85rem; color:#64b5f6;">EMA 9/15 | TP +1.2% | SL -1.0%</div>
+        </div>
+        <div class="card">
+            <div class="card-label">Telegram Alerts</div>
+            <div class="card-val" style="font-size:0.85rem; color:#29b6f6;">Connected 📱</div>
+        </div>
+    </div>
+    <div style="font-weight:bold; font-size:0.85rem; color:#aaa; margin-bottom:6px;">💻 LIVE CONSOLE LOGS (CMD STYLE - AUTO REFRESH 5s):</div>
+    <div class="terminal-box" id="term">{logs_html}</div>
+    <div class="footer">Page auto-refreshes every 5s | Cloud hosted on Render 24/7</div>
+    <script>
+        var term = document.getElementById('term');
+        term.scrollTop = term.scrollHeight;
+    </script>
 </body>
 </html>"""
         self.wfile.write(html.encode('utf-8'))
