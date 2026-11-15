@@ -28,6 +28,27 @@ def send_message(text):
     except Exception as e:
         print(f"[TELEGRAM ERROR] Could not send message: {e}")
 
+def notify_active_trade_update(symbol, side, entry, current_price, pnl_pct, balance_usd, balance_inr, ema9, ema15, time_ist):
+    side_label = "LONG (BUY) 🟢" if side == "buy" else "SHORT (SELL) 🔴"
+    pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
+    msg = (
+        f"📊 LIVE TRADE STATUS UPDATE\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"⏰ Time: {time_ist}\n"
+        f"🪙 Coin: {symbol}\n"
+        f"📌 Trade: {side_label}\n"
+        f"💵 Entry: ${entry:,.4f}\n"
+        f"📈 Current: ${current_price:,.4f}\n"
+        f"{pnl_emoji} Live PnL: {pnl_pct:+.2f}%\n"
+        f"💰 Balance: ${balance_usd:.4f} USD (~Rs.{balance_inr:.2f})\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"🎯 Strategy: EMA 9/15 | TP +1.2% | SL -1.0%\n"
+        f"📐 EMA9: {ema9} | EMA15: {ema15}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"🤖 Status: 24/7 Cloud Active on Render"
+    )
+    send_message(msg)
+
 def notify_buy(symbol, price, qty, balance):
     msg = (
         f"🚀 BUY (LONG) SIGNAL!\n"

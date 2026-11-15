@@ -2,6 +2,7 @@ import time
 import datetime
 import sys
 import os
+import urllib.request
 import config
 from indicators import check_ema_crossover, calculate_rsi, check_higher_timeframe_trend
 from delta_client import (
@@ -18,7 +19,8 @@ from telegram_bot import (
     notify_stop_loss,
     notify_ema_exit,
     notify_bot_started,
-    notify_scan_summary
+    notify_scan_summary,
+    notify_active_trade_update
 )
 import http.server
 import socketserver
@@ -112,7 +114,7 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
     </div>
     <div style="font-weight:bold; font-size:0.85rem; color:#aaa; margin-bottom:6px;">💻 LIVE CONSOLE LOGS (CMD STYLE - AUTO REFRESH 5s):</div>
     <div class="terminal-box" id="term">{logs_html}</div>
-    <div class="footer">Page auto-refreshes every 5s | Cloud hosted on Render 24/7</div>
+    <div class="footer">Page auto-refreshes every 5s | Indian Time (IST) 🇮🇳 | Cloud hosted on Render 24/7</div>
     <script>
         var term = document.getElementById('term');
         term.scrollTop = term.scrollHeight;
@@ -123,6 +125,28 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         pass  # Suppress HTTP request logs from console
+
+def get_ist_time():
+    """Return Indian Standard Time (IST = UTC + 5:30) string"""
+    utc_now = datetime.datetime.now(datetime.timezone.utc)
+    ist_now = utc_now + datetime.timedelta(hours=5, minutes=30)
+    return ist_now.strftime("%Y-%m-%d %H:%M:%S IST")
+
+def keep_alive_loop():
+    """Keeps Render Free Web Service awake 24/7 by pinging it every 5 minutes"""
+    time.sleep(30)
+    port = int(os.environ.get("PORT", 8080))
+    external_url = os.environ.get("RENDER_EXTERNAL_URL")
+    target = external_url if external_url else f"http://127.0.0.1:{port}"
+    while True:
+        try:
+            req = urllib.request.Request(target, headers={'User-Agent': 'DeltaBotKeepAlive/1.0'})
+            urllib.request.urlopen(req, timeout=10)
+        except Exception:
+            pass
+        time.sleep(300)
+
+threading.Thread(target=keep_alive_loop, daemon=True).start()
 
 def start_health_server():
     port = int(os.environ.get("PORT", 8080))
@@ -168,6 +192,7 @@ class SafeMicroCryptoBot:
     def __init__(self):
         self.watchlist = config.WATCHLIST
         self.last_summary_time = 0  # For periodic Telegram summaries (every 30 min)
+        self.last_trade_alert_time = 0  # For periodic Telegram trade updates (every 10 min)
         print("=" * 70)
         print("   DELTA EXCHANGE 24/7 SAFE MICRO-CRYPTO BOT (BUY + SELL + TELEGRAM)")
         print("=" * 70)
@@ -232,12 +257,32 @@ class SafeMicroCryptoBot:
         candles = get_candles(symbol, resolution=config.TIMEFRAME_MINUTES, count=30)
         signal, ema9, ema15 = check_ema_crossover(candles, fast_period=config.FAST_EMA, slow_period=config.SLOW_EMA)
 
-        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = get_ist_time()
         side_label = "LONG" if side == 'buy' else "SHORT"
         pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
         print(f"[{now_str}] [{side_label} ACTIVE] {symbol} @ ${entry:,.4f} | Now: ${current_price:,.4f} | {pnl_emoji} PnL: {pnl_pct:+.2f}% | EMA9: {ema9} / EMA15: {ema15}")
 
         balance = self.get_balance_usd()
+
+        # Send Telegram trade update every 10 minutes (or on first detection)
+        now_ts = time.time()
+        if now_ts - self.last_trade_alert_time >= 600:
+            bal_obj = get_wallet_balance()
+            bal_usd = bal_obj['total_usd'] if bal_obj else balance
+            bal_inr = bal_obj['balance_inr'] if bal_obj else (balance * 85.0)
+            notify_active_trade_update(
+                symbol=symbol,
+                side=side,
+                entry=entry,
+                current_price=current_price,
+                pnl_pct=pnl_pct,
+                balance_usd=bal_usd,
+                balance_inr=bal_inr,
+                ema9=ema9,
+                ema15=ema15,
+                time_ist=now_str
+            )
+            self.last_trade_alert_time = now_ts
 
         # === EXIT CONDITIONS ===
         # 1. Take Profit
@@ -269,7 +314,7 @@ class SafeMicroCryptoBot:
         BUY  = EMA9 crosses ABOVE EMA15 + 15m Bullish (above 50-EMA)
         SELL = EMA9 crosses BELOW EMA15 + 15m Bearish (below 50-EMA)
         """
-        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = get_ist_time()
         scan_summary = []
 
         for symbol in self.watchlist:
@@ -354,6 +399,7 @@ class SafeMicroCryptoBot:
             return
 
         place_order(symbol=symbol, side=side, order_type="market", size=qty)
+        self.last_trade_alert_time = time.time()
         time.sleep(2)
         real_pos = self.get_real_active_position()
         if real_pos and real_pos['symbol'] == symbol:
