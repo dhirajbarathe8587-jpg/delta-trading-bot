@@ -25,6 +25,12 @@ class McpResponseTests(unittest.TestCase):
 
         self.assertIsNone(balance)
 
+    def test_failure_response_includes_mcp_error_reason(self):
+        response = {"success": False, "message": "Action ID not found"}
+
+        with self.assertRaisesRegex(ValueError, "Action ID not found"):
+            delta_client._mcp_records(response, "Wallet balance", ("asset_symbol", "balance"))
+
     def test_open_positions_parses_nested_records(self):
         response = {
             "data": {

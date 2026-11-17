@@ -59,6 +59,11 @@ def _mcp_records(response, context, record_fields):
     value = _decode_mcp_value(response, context)
     if isinstance(value, dict):
         if value.get('success') is False:
+            failure = value.get('error') or value.get('message') or value.get('description')
+            if isinstance(failure, dict):
+                failure = failure.get('message') or failure.get('error')
+            if isinstance(failure, str) and failure.strip():
+                raise ValueError(f"{context} action reported failure: {failure[:200]}")
             raise ValueError(f"{context} action reported failure")
         if 'data' in value:
             value = value['data']
