@@ -1,32 +1,125 @@
 """
 Telegram Notification Module for DeltaTradingBot
-Sends real-time trade alerts to your mobile phone
+Sends trade alerts and handles authorized Telegram commands
 """
 import urllib.request
 import json
-import ssl
+import os
+import threading
+import time
 
-TELEGRAM_TOKEN = "8051880123:AAFc1R43dq1M0svYHtCyJkpYX7KEVOKZ1GY"
-TELEGRAM_CHAT_ID = "5029569407"
+_warning_logged = False
+_listener_thread = None
 
-def _ssl_ctx():
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return ctx
+def _api_request(method, payload, timeout=10):
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not configured")
 
-def send_message(text):
-    """Send a plain text message to Telegram"""
+    url = f"https://api.telegram.org/bot{token}/{method}"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        result = json.loads(response.read().decode("utf-8"))
+    if not result.get("ok"):
+        raise RuntimeError(result.get("description", "Telegram API request failed"))
+    return result.get("result")
+
+def send_message(text, chat_id=None):
+    """Send a message to the configured chat or a specified authorized chat."""
+    global _warning_logged
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    destination = str(chat_id or os.environ.get("TELEGRAM_CHAT_ID", "").strip())
+    if not token or not destination:
+        if not _warning_logged:
+            print("[TELEGRAM] Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to enable Telegram.")
+            _warning_logged = True
+        return False
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = json.dumps({
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": text
-        }).encode()
-        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, context=_ssl_ctx(), timeout=10)
+        _api_request("sendMessage", {"chat_id": destination, "text": text})
+        return True
     except Exception as e:
         print(f"[TELEGRAM ERROR] Could not send message: {e}")
+        return False
+
+def _handle_update(update):
+    message = update.get("message") or update.get("edited_message")
+    if not message or not message.get("chat"):
+        return
+
+    authorized_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    chat_id = str(message["chat"].get("id", ""))
+    if not authorized_chat_id or chat_id != authorized_chat_id:
+        return
+
+    text = (message.get("text") or "").strip()
+    if not text:
+        send_message("I can read text commands. Send /help to see available commands.", chat_id)
+        return
+
+    command = text.split()[0].split("@")[0].lower()
+    if command in ("/start", "/help"):
+        reply = (
+            "DeltaTradingBot commands:\n"
+            "/status - check that the bot is running\n"
+            "/balance - get the Delta Exchange account balance\n\n"
+            "Account credentials are managed in ViaSocket/Render settings; "
+            "do not send API keys or secrets in Telegram."
+        )
+    elif command == "/status":
+        reply = "✅ DeltaTradingBot is running and listening for Telegram commands."
+    elif command == "/balance":
+        try:
+            from delta_client import get_wallet_balance
+            balance = get_wallet_balance()
+            if not balance:
+                reply = "Could not read the account balance. Check the ViaSocket MCP connection and Render logs."
+            else:
+                reply = (
+                    f"Delta Exchange balance:\n"
+                    f"Total: ${balance['total_usd']:.4f} USD\n"
+                    f"Available: ${balance['available_usd']:.4f} USD\n"
+                    f"Approx: Rs.{balance['balance_inr']:.2f}"
+                )
+        except Exception as e:
+            print(f"[TELEGRAM ERROR] Balance command failed: {e}")
+            reply = "Could not read the account balance. Check the ViaSocket MCP connection and Render logs."
+    else:
+        reply = "Message received. Send /help for the available commands."
+
+    send_message(reply, chat_id)
+
+def _poll_updates():
+    offset = None
+    while True:
+        try:
+            payload = {"timeout": 25, "allowed_updates": ["message"]}
+            if offset is not None:
+                payload["offset"] = offset
+            updates = _api_request("getUpdates", payload, timeout=35) or []
+            for update in updates:
+                offset = update["update_id"] + 1
+                _handle_update(update)
+        except Exception as e:
+            print(f"[TELEGRAM ERROR] Command listener failed: {e}")
+            time.sleep(5)
+
+def start_command_listener():
+    """Start long polling for commands from the configured Telegram chat."""
+    global _listener_thread
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat_id:
+        print("[TELEGRAM] Command listener disabled; set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.")
+        return
+    if _listener_thread and _listener_thread.is_alive():
+        return
+    _listener_thread = threading.Thread(target=_poll_updates, daemon=True)
+    _listener_thread.start()
+    print("[TELEGRAM] Command listener started.")
 
 def notify_active_trade_update(symbol, side, entry, current_price, pnl_pct, balance_usd, balance_inr, ema9, ema15, time_ist):
     side_label = "LONG (BUY) 🟢" if side == "buy" else "SHORT (SELL) 🔴"

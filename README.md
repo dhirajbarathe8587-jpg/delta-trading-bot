@@ -36,3 +36,17 @@
 * **config.py:** कॉईन्सची यादी (Watchlist), EMA, आणि Take Profit / Stop Loss सेटिंग्स.
 * **trading_bot.log:** सर्व लाईव्ह ट्रेड्स आणि स्कॅन रिपोर्ट.
 * **start_bot.bat:** एका क्लिकवर मॅन्युअली सुरू करण्यासाठी.
+
+---
+
+### Render व Telegram सेटअप
+
+Render मधील service → **Environment** येथे खालील variables configure करा:
+
+* `TELEGRAM_BOT_TOKEN`: BotFather कडून मिळालेला Telegram bot token.
+* `TELEGRAM_CHAT_ID`: bot शी संवाद साधणाऱ्या तुमच्या Telegram chat चा ID (उदा. `@userinfobot` कडून मिळवा).
+* `MCP_URL`: तुमच्या Delta Exchange India ViaSocket MCP connection चा endpoint.
+
+Delta Exchange account credentials ViaSocket मधील त्या MCP connection मध्ये configure करा. नवीन account जोडताना ViaSocket connection update करून Render मधील `MCP_URL` बदला आणि service redeploy करा. API key किंवा secret Telegram message, source code किंवा GitHub मध्ये टाकू नका.
+
+Bot ला `/start` किंवा `/help`, `/status`, आणि `/balance` पाठवल्यावर उत्तर मिळेल. फक्त `TELEGRAM_CHAT_ID` शी जुळणाऱ्या chat मधील commands स्वीकारले जातील.

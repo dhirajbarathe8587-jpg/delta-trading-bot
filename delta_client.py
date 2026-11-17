@@ -12,6 +12,9 @@ HEADERS = {
 
 def call_mcp_tool(action_name, instructions):
     """Call Delta Exchange action via Viasocket MCP Endpoint"""
+    if not config.MCP_URL:
+        raise RuntimeError("MCP_URL is not configured")
+
     thread_id = str(uuid.uuid4())[:8]
     payload = {
         "jsonrpc": "2.0",

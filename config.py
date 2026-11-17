@@ -1,6 +1,8 @@
+import os
+
 # Configuration for Delta Exchange Automated 24/7 Safe Micro-Crypto Bot
 
-MCP_URL = "https://mcp.viasocket.com/mcp/6af360c8e54464112ba88f7e-85776"
+MCP_URL = os.environ.get("MCP_URL", "").strip()
 DELTA_API_BASE = "https://api.india.delta.exchange"
 
 # Safe Micro-Contract Cryptos:

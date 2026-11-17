@@ -20,7 +20,8 @@ from telegram_bot import (
     notify_ema_exit,
     notify_bot_started,
     notify_scan_summary,
-    notify_active_trade_update
+    notify_active_trade_update,
+    start_command_listener
 )
 import http.server
 import socketserver
@@ -425,6 +426,8 @@ class SafeMicroCryptoBot:
         print(f"[CLOSED] {symbol} closed. ({reason})")
 
     def start(self):
+        start_command_listener()
+
         print("\nChecking Account Balance...")
         bal = get_wallet_balance()
         bal_usd = 0.0
