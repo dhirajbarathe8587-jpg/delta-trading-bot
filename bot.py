@@ -235,7 +235,7 @@ class SafeMicroCryptoBot:
                         }
         except Exception as e:
             print(f"[WARN] Failed checking open positions: {e}")
-        return None
+            raise
 
     def monitor_active_trade(self, pos):
         """Monitor live confirmed position - handles both BUY/LONG and SELL/SHORT"""
@@ -399,7 +399,11 @@ class SafeMicroCryptoBot:
             print(f"[DRY RUN] {symbol} simulated {label} opened.")
             return
 
-        place_order(symbol=symbol, side=side, order_type="market", size=qty)
+        order_result = place_order(symbol=symbol, side=side, order_type="market", size=qty)
+        if order_result is None:
+            print("[ERROR] Order request failed and was not confirmed.")
+            return
+
         self.last_trade_alert_time = time.time()
         time.sleep(2)
         real_pos = self.get_real_active_position()
@@ -407,7 +411,7 @@ class SafeMicroCryptoBot:
             confirmed = "LONG" if real_pos['side'] == 'buy' else "SHORT"
             print(f"[VERIFIED] {symbol} {confirmed} LIVE on Delta Exchange! Entry: ${real_pos['entry_price']:,.4f}")
         else:
-            print(f"[STATUS] Order sent. Verifying in next cycle.")
+            print("[WARN] Order response received, but no position was confirmed. Check Delta Exchange before retrying.")
 
     def close_position(self, symbol, size, side, reason=""):
         exit_side = "sell" if side == "buy" else "buy"
@@ -426,16 +430,15 @@ class SafeMicroCryptoBot:
         print(f"[CLOSED] {symbol} closed. ({reason})")
 
     def start(self):
-        start_command_listener()
-
         print("\nChecking Account Balance...")
         bal = get_wallet_balance()
-        bal_usd = 0.0
-        if bal:
-            bal_usd = bal['total_usd']
-            print(f"Balance: ${bal['total_usd']:.4f} USD (~Rs.{bal['balance_inr']:.2f} INR) | Free: ${bal['available_usd']:.4f} USD")
-        else:
-            print("[INFO] Could not fetch balance, proceeding...")
+        if not bal:
+            print("[ERROR] Account balance unavailable. Bot will not start; check MCP and account configuration.")
+            return
+
+        bal_usd = bal['total_usd']
+        print(f"Balance: ${bal['total_usd']:.4f} USD (~Rs.{bal['balance_inr']:.2f} INR) | Free: ${bal['available_usd']:.4f} USD")
+        start_command_listener()
 
         print(f"\nBot is LIVE - Scanning BUY & SELL signals 24/7. Press Ctrl+C to stop.\n")
 
